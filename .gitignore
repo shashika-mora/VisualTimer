@@ -1,4 +1,6 @@
 build/
+dist/
 *.ini
 *.exe
+*.zip
 *.o
