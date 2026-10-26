@@ -1,4 +1,4 @@
-﻿// Visual Timer - a tiny native Win32/GDI+ visual countdown timer designed to
+// Visual Timer - a tiny native Win32/GDI+ visual countdown timer designed to
 // make elapsed and remaining time *visible* (helpful for ADHD "time blindness").
 // Single static executable, no installer, no runtime dependencies.
 
@@ -63,6 +63,10 @@ static HICON g_icon, g_iconSmall;
 static NOTIFYICONDATAW g_nid;
 static ULONG_PTR g_gdipToken;
 static std::wstring g_ini;
+static RECT g_savedRect;            // normal window rect saved while in focus mode
+static const int kFocusSide = 320;  // size (px) of the clock-only window
+static RECT g_savedRect;            // normal window rect saved while in focus mode
+static const int kFocusSide = 320;  // size (px) of the clock-only window
 
 // ------------------------------------------------------------------ helpers
 static double elapsedSec() {
@@ -231,6 +235,20 @@ struct Ui {
 } U;
 
 static void buildUi(int W, int H) {
+    if (S.focus) {
+        float fu = W / 300.f;
+        U.u = fu;
+        U.b.clear();
+        U.cx = W / 2.f;
+        U.cy = H / 2.f;
+        U.R = W / 2.f - 3 * fu;
+        U.digits = RectF(0, U.cy - 52 * fu, (float)W, 62 * fu);
+        U.status = RectF(0, U.cy + 8 * fu, (float)W, 20 * fu);
+        U.hint = RectF(0, 0, 0, 0);
+        if (S.mouseIn)
+            U.b.push_back({RectF(U.cx - 60 * fu, U.cy + 36 * fu, 120 * fu, 38 * fu), ID_START, L"PAUSE", false, false});
+        return;
+    }
     float u = min(W / 400.f, H / 660.f);
     U.u = u;
     U.b.clear();
@@ -395,7 +413,7 @@ static void paintAll(HDC hdc, int W, int H) {
         float r1 = R - 2 * u, r2 = R - (mj ? 14 : 8) * u;
         g.DrawLine(mj ? &major : &minor, cx + (float)cos(a) * r1, cy + (float)sin(a) * r1,
                    cx + (float)cos(a) * r2, cy + (float)sin(a) * r2);
-        if (mj && !S.prop) {
+        if (mj && !S.prop && !S.focus) {
             float lr = R + 13 * u;
             wchar_t t[8];
             swprintf(t, 8, L"%d", i / 5 * 5);
@@ -406,20 +424,27 @@ static void paintAll(HDC hdc, int W, int H) {
     SolidBrush knob(p.bg);
     g.FillEllipse(&knob, cx - 7 * u, cy - 7 * u, 14 * u, 14 * u);
 
-    // --- digits + status
-    std::wstring big = over ? fmt((long)(-rem), true) : fmt((long)std::ceil(rem));
-    text(g, big, L"Consolas", 76 * u, true, over ? amber : p.text, U.digits);
-    std::wstring st;
-    Color stc = p.sub;
-    if (!S.started) st = L"Ready: pick a time or drag the dial";
-    else if (over) { st = L"OVERTIME - you planned " + fmt(S.totalSec); stc = amber; }
-    else st = std::wstring(S.running ? L"Elapsed " : L"Paused - elapsed ") + fmt((long)el) + L" of " + fmt(S.totalSec);
-    text(g, st, L"Segoe UI", 13.5f * u, false, stc, U.status);
+    // --- digits + status (in focus mode only while hovering)
+    if (!S.focus || S.mouseIn) {
+        if (S.focus) {
+            SolidBrush veil(Color(190, p.bg.GetR(), p.bg.GetG(), p.bg.GetB()));
+            g.FillEllipse(&veil, cx - R, cy - R, 2 * R, 2 * R);
+        }
+        std::wstring big = over ? fmt((long)(-rem), true) : fmt((long)std::ceil(rem));
+        text(g, big, L"Consolas", (S.focus ? 50 : 76) * u, true, over ? amber : p.text, U.digits);
+        std::wstring st;
+        Color stc = p.sub;
+        if (!S.started) st = L"Ready: pick a time or drag the dial";
+        else if (over) { st = L"OVERTIME - you planned " + fmt(S.totalSec); stc = amber; }
+        else st = std::wstring(S.running ? L"Elapsed " : L"Paused - elapsed ") + fmt((long)el) + L" of " + fmt(S.totalSec);
+        text(g, st, L"Segoe UI", (S.focus ? 12.f : 13.5f) * u, false, stc, U.status);
+    }
 
     // --- buttons
     for (auto& b : U.b) drawButton(g, b, p, accent);
-    text(g, L"Space start/pause   R reset   Up/Down +-1 min   Wheel/drag dial", L"Segoe UI", 11 * u,
-         false, p.tick, U.hint);
+    if (!S.focus)
+        text(g, L"Space start/pause   R reset   Up/Down +-1 min   Wheel/drag dial", L"Segoe UI", 11 * u,
+             false, p.tick, U.hint);
 }
 
 // ------------------------------------------------------------ window state
@@ -447,6 +472,33 @@ static void updateTitle() {
     Shell_NotifyIconW(NIM_MODIFY, &n);
 }
 
+// Running => borderless clock-only window (round). Paused/idle => normal app window.
+static void setFocus(bool on) {
+    if (on == S.focus) return;
+    if (on) {
+        GetWindowRect(g_hwnd, &g_savedRect);
+        POINT c = {(LONG)U.cx, (LONG)U.cy};
+        ClientToScreen(g_hwnd, &c);
+        int side = kFocusSide;
+        S.focus = true;
+        SetWindowLongPtrW(g_hwnd, GWL_STYLE, WS_POPUP | WS_VISIBLE);
+        SetWindowPos(g_hwnd, nullptr, c.x - side / 2, c.y - side / 2, side, side,
+                     SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE);
+        SetWindowRgn(g_hwnd, CreateEllipticRgn(0, 0, side + 1, side + 1), TRUE);
+    } else {
+        S.focus = false;
+        SetWindowRgn(g_hwnd, nullptr, TRUE);
+        SetWindowLongPtrW(g_hwnd, GWL_STYLE, WS_OVERLAPPEDWINDOW | WS_VISIBLE);
+        RECT r = g_savedRect;
+        SetWindowPos(g_hwnd, nullptr, r.left, r.top, r.right - r.left, r.bottom - r.top,
+                     SWP_NOZORDER | SWP_FRAMECHANGED | SWP_NOACTIVATE);
+        applyTheme();
+    }
+    S.mouseIn = false;
+    S.hover = 0;
+    InvalidateRect(g_hwnd, nullptr, FALSE);
+}
+
 static void doAction(int id) {
     if (id >= ID_PRESET0 && id < ID_PRESET0 + 7) {
         setTotalAndStart(kPresets[id - ID_PRESET0]);
@@ -461,6 +513,7 @@ static void doAction(int id) {
         case ID_SCALE: S.prop = !S.prop; break;
         case ID_COLOR: S.colorIdx = (S.colorIdx + 1) % kAccentCount; break;
     }
+    setFocus(S.running);
     updateTitle();
     InvalidateRect(g_hwnd, nullptr, FALSE);
 }
@@ -515,7 +568,7 @@ static void saveSettings() {
     puti(L"Color", S.colorIdx);
     WINDOWPLACEMENT wp = {sizeof(wp)};
     if (GetWindowPlacement(g_hwnd, &wp)) {
-        RECT r = wp.rcNormalPosition;
+        RECT r = S.focus ? g_savedRect : wp.rcNormalPosition;
         puti(L"X", r.left);
         puti(L"Y", r.top);
         puti(L"W", r.right - r.left);
@@ -583,6 +636,13 @@ static LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_TIMER:
             tick();
             updateTitle();
+            if (S.focus) {  // poll hover: client mouse messages stop while dragging the window
+                POINT pt;
+                RECT wr;
+                GetCursorPos(&pt);
+                GetWindowRect(h, &wr);
+                S.mouseIn = PtInRect(&wr, pt) != 0;
+            }
             if (S.running) InvalidateRect(h, nullptr, FALSE);
             return 0;
         case WM_ERASEBKGND: return 1;
@@ -625,6 +685,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_MOUSEMOVE: {
             int x = (short)LOWORD(lp), y = (short)HIWORD(lp);
             if (S.dragging) { dragDial(x, y); return 0; }
+            S.mouseIn = true;
             int hv = hitTest((float)x, (float)y);
             if (hv != S.hover) {
                 S.hover = hv;
@@ -634,12 +695,15 @@ static LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
             TrackMouseEvent(&t);
             return 0;
         }
-        case WM_MOUSELEAVE: S.hover = 0; InvalidateRect(h, nullptr, FALSE); return 0;
+        case WM_MOUSELEAVE: S.hover = 0; S.mouseIn = false; InvalidateRect(h, nullptr, FALSE); return 0;
         case WM_LBUTTONDOWN: {
             int x = (short)LOWORD(lp), y = (short)HIWORD(lp);
             int id = hitTest((float)x, (float)y);
             if (id) doAction(id);
-            else if (!S.started && inDial(x, y)) { S.dragging = true; SetCapture(h); dragDial(x, y); }
+            else if (S.focus) {  // borderless: drag the clock anywhere
+                ReleaseCapture();
+                SendMessageW(h, WM_NCLBUTTONDOWN, HTCAPTION, 0);
+            } else if (!S.started && inDial(x, y)) { S.dragging = true; SetCapture(h); dragDial(x, y); }
             return 0;
         }
         case WM_LBUTTONUP:

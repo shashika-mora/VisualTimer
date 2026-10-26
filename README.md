@@ -7,6 +7,7 @@ inspired by Time Timer-style analog visual timers. One portable `.exe` (~1 MB), 
 
 - **Red-disc dial**: the remaining time is a shrinking wedge, so you *see* time disappear (no mental subtraction).
 - **Overtime mode**: after zero, an amber wedge grows and the clock counts `+mm:ss`, which makes hyperfocus overruns visible.
+- **Focus mode**: once running, the window becomes a borderless round clock showing only the dial. Hover to reveal the digits and a Pause button; leave to hide them again. Drag the clock to move it. Click Pause (or press Space) to bring back the normal window.
 - Presets (5 / 10 / 15 / 25 / 30 / 45 / 60 min); click and drag the dial, mouse wheel, or Up/Down keys for custom time.
 - **Always on top** or normal (background) window mode.
 - **Notifications** (Windows toast/balloon via tray icon) and taskbar flashing; time also shown in the title/taskbar tooltip.
@@ -44,3 +45,4 @@ This app is a productivity aid, not medical advice.
 ## License
 
 MIT
+
