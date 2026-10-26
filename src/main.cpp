@@ -54,6 +54,8 @@ struct State {
     int nudgeIdx = 0, colorIdx = 0;
     // ui
     bool dragging = false;
+    bool focus = false;    // borderless "clock only" mode while the timer runs
+    bool mouseIn = false;  // cursor currently over the window
     int hover = 0;
     long lastShownSec = -999999;
 } S;
@@ -63,8 +65,6 @@ static HICON g_icon, g_iconSmall;
 static NOTIFYICONDATAW g_nid;
 static ULONG_PTR g_gdipToken;
 static std::wstring g_ini;
-static RECT g_savedRect;            // normal window rect saved while in focus mode
-static const int kFocusSide = 320;  // size (px) of the clock-only window
 static RECT g_savedRect;            // normal window rect saved while in focus mode
 static const int kFocusSide = 320;  // size (px) of the clock-only window
 
